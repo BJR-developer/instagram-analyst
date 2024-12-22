@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { MongoClient } from 'mongodb';
+import { MongoClient } from "mongodb";
 
 declare global {
   var mongoose: {
@@ -8,8 +8,8 @@ declare global {
   };
 }
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not defined");
+if (!process.env.MONGODB_URI) {
+  throw new Error("MONGODB_URI is not defined");
 }
 
 let cached = global.mongoose;
@@ -27,11 +27,11 @@ export async function connectDB() {
 
     // First try to connect with MongoClient to test the connection
     console.log("Testing connection with MongoClient...");
-    const client = new MongoClient(process.env.DATABASE_URL!, {
+    const client = new MongoClient(process.env.MONGODB_URI!, {
       connectTimeoutMS: 10000,
       serverSelectionTimeoutMS: 10000,
     });
-    
+
     await client.connect();
     console.log("MongoClient connected successfully!");
     await client.close();
@@ -47,8 +47,8 @@ export async function connectDB() {
       };
 
       console.log("Creating new Mongoose connection...");
-      mongoose.set('strictQuery', false);
-      cached.promise = mongoose.connect(process.env.DATABASE_URL!, opts);
+      mongoose.set("strictQuery", false);
+      cached.promise = mongoose.connect(process.env.MONGODB_URI!, opts);
     }
 
     console.log("Awaiting Mongoose connection...");
