@@ -4,6 +4,7 @@ const accountSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   lastUpdated: { type: Date, default: Date.now },
   currentFollowers: { type: Number, required: true },
+  userEmail: { type: String, required: true },
 });
 
 const followerHistorySchema = new mongoose.Schema({

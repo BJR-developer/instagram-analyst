@@ -1,62 +1,52 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Account, FollowerHistory } from "@/lib/schema";
+import { getServerSession } from "next-auth";
+import { InstagramData } from "@/lib/api/type";
+import { getAccountData, getFollowerChange } from "@/lib/api/get.actions";
+import {
+  calculateAvgComments,
+  calculateAvgLikes,
+  calculateEngagement,
+} from "@/lib/api/helpers.actions";
 
 const INSTAGRAM_API_URL =
   "https://www.instagram.com/api/v1/users/web_profile_info/";
 
-interface InstagramPost {
-  node: {
-    edge_liked_by: {
-      count: number;
-    };
-    edge_media_to_comment: {
-      count: number;
-    };
-  };
+export async function GET() {
+  await connectDB();
+
+  const currentUser = await getServerSession();
+
+  if (!currentUser) {
+    return NextResponse.json({ error: "User not logged in" }, { status: 401 });
+  }
+
+  const loggedUser = currentUser?.user;
+
+  if (!loggedUser) {
+    return NextResponse.json({ error: "User not logged in" }, { status: 401 });
+  }
+  const accounts = await Account.find({
+    userEmail: loggedUser?.email,
+  });
+
+  if (!accounts) {
+    return NextResponse.json({ error: "No accounts found" }, { status: 404 });
+  }
+
+  const finalData = Promise.all(
+    accounts.map(async (account) => {
+      const data = await getAccountData(account._id.toString());
+      return data;
+    })
+  );
+
+  return NextResponse.json(finalData);
 }
 
-interface InstagramUser {
-  edge_owner_to_timeline_media: {
-    edges: InstagramPost[];
-  };
-  edge_followed_by: {
-    count: number;
-  };
-  edge_follow: {
-    count: number;
-  };
-  username: string;
-  full_name: string;
-}
-
-interface InstagramData {
-  data: {
-    user: InstagramUser;
-  };
-}
-
-async function getFollowerChange(accountId: string, hours: number) {
-  const targetTime = new Date();
-  targetTime.setHours(targetTime.getHours() - hours);
-
-  const history = await FollowerHistory.find({
-    accountId,
-    timestamp: { $gte: targetTime },
-  }).sort({ timestamp: 1 });
-
-  if (history.length === 0) return 0;
-
-  const currentFollowerData = await Account.findById(accountId);
-
-  if (!currentFollowerData) return 0;
-
-  return currentFollowerData.currentFollowers - history[0].count;
-}
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const username = searchParams.get("username");
+export async function POST(request: Request) {
+  const { username }: any = request.body;
   await connectDB();
 
   if (!username) {
@@ -68,6 +58,14 @@ export async function GET(request: Request) {
 
   try {
     // Try to fetch fresh data from Instagram
+
+    const fetchedCurrentUser = await getServerSession();
+
+    const loggedUser = fetchedCurrentUser?.user;
+    if (!loggedUser) {
+      throw new Error("User not logged in");
+    }
+
     console.log(`Fetching Instagram data for username: ${username}`);
     const apiUrl = `${INSTAGRAM_API_URL}?username=${username}`;
     console.log(`API URL: ${apiUrl}`);
@@ -129,14 +127,17 @@ export async function GET(request: Request) {
     }
 
     // Find or create account in database
-    let account = await Account.findOne({ username: user.username });
+    let account = await Account.findOne({
+      username: user.username,
+      userEmail: loggedUser?.email,
+    });
     console.log({ account });
     if (!account) {
       account = await Account.create({
         username: user.username,
         currentFollowers: user.edge_followed_by.count,
+        userEmail: loggedUser?.email,
       });
-      console.log({ account });
     }
 
     // Update follower history if count changed
@@ -187,41 +188,4 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-}
-
-function calculateEngagement(user: InstagramUser) {
-  const posts = user.edge_owner_to_timeline_media.edges;
-  if (!posts.length) return 0;
-
-  const totalEngagement = posts.reduce((sum: number, post: InstagramPost) => {
-    return (
-      sum +
-      post.node.edge_liked_by.count +
-      post.node.edge_media_to_comment.count
-    );
-  }, 0);
-
-  return (totalEngagement / posts.length / user.edge_followed_by.count) * 100;
-}
-
-function calculateAvgLikes(user: InstagramUser) {
-  const posts = user.edge_owner_to_timeline_media.edges;
-  if (!posts.length) return 0;
-
-  const totalLikes = posts.reduce((sum: number, post: InstagramPost) => {
-    return sum + post.node.edge_liked_by.count;
-  }, 0);
-
-  return Math.round(totalLikes / posts.length);
-}
-
-function calculateAvgComments(user: InstagramUser) {
-  const posts = user.edge_owner_to_timeline_media.edges;
-  if (!posts.length) return 0;
-
-  const totalComments = posts.reduce((sum: number, post: InstagramPost) => {
-    return sum + post.node.edge_media_to_comment.count;
-  }, 0);
-
-  return Math.round(totalComments / posts.length);
 }

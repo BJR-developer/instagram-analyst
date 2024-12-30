@@ -5,15 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useQuery } from "@tanstack/react-query";
 
 interface AccountStats {
   username: string;
   followers: number;
-  following: number;
-  posts: number;
-  engagement: number;
-  avgLikes: number;
-  avgComments: number;
 }
 
 export default function Home() {
@@ -59,6 +55,17 @@ export default function Home() {
       setLoading(false);
     }
   };
+
+  const { isLoading: isDataFetching } = useQuery({
+    queryKey: ["accounts"],
+    queryFn: () =>
+      fetch("/api/instagram").then((res) => {
+        const data: any = res.json;
+        console.log(data);
+        setAccounts(data ?? []);
+        return data;
+      }),
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -112,6 +119,12 @@ export default function Home() {
             <TabsTrigger value="30d">30 Days</TabsTrigger>
           </TabsList>
 
+          {isDataFetching && (
+            <div className="flex justify-center items-center h-96">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+            </div>
+          )}
+
           <TabsContent value="overview" className="space-y-6">
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {accounts.map((account) => (
@@ -159,9 +172,7 @@ export default function Home() {
                         <p className="text-sm font-medium text-gray-500">
                           Engagement Rate
                         </p>
-                        <p className="text-lg font-semibold">
-                          {account.engagement.toFixed(2)}%
-                        </p>
+                        <p className="text-lg font-semibold">{100}%</p>
                       </div>
                     </div>
                   </CardContent>
