@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Account, FollowerHistory } from "@/lib/schema";
+import { Account, User } from "@/lib/schema";
 import { getServerSession } from "next-auth";
 import { InstagramData } from "@/lib/api/type";
-import { getAccountData, getFollowerChange } from "@/lib/api/get.actions";
-import {
-  calculateAvgComments,
-  calculateAvgLikes,
-  calculateEngagement,
-} from "@/lib/api/helpers.actions";
-
 const INSTAGRAM_API_URL =
   "https://www.instagram.com/api/v1/users/web_profile_info/";
 
@@ -35,40 +28,51 @@ export async function GET() {
     return NextResponse.json({ error: "No accounts found" }, { status: 404 });
   }
 
-  const finalData = Promise.all(
-    accounts.map(async (account) => {
-      const data = await getAccountData(account._id.toString());
-      return data;
-    })
-  );
+  // const finalData = Promise.all(
+  //   accounts.map(async (account) => {
+  //     const data = await getAccountData(account._id.toString());
+  //     return data;
+  //   })
+  // );
 
-  return NextResponse.json(finalData);
+  return NextResponse.json([]);
 }
 
-export async function POST(request: Request) {
-  const { username }: any = request.body;
-  await connectDB();
-
-  if (!username) {
-    return NextResponse.json(
-      { error: "Username is required" },
-      { status: 400 }
-    );
-  }
-
+export async function POST(req: Request) {
   try {
-    // Try to fetch fresh data from Instagram
-
-    const fetchedCurrentUser = await getServerSession();
-
-    const loggedUser = fetchedCurrentUser?.user;
-    if (!loggedUser) {
-      throw new Error("User not logged in");
+    const session = await getServerSession();
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.log(`Fetching Instagram data for username: ${username}`);
+    const { username } = await req.json();
+    if (!username) {
+      return NextResponse.json(
+        { error: "Username is required" },
+        { status: 400 }
+      );
+    }
+
+    await connectDB();
+    const user = await User.findOne({ email: session?.user.email });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Check if account already exists
+    if (
+      user.instagramAccounts.some(
+        (account: any) => account.username === username
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Account already exists" },
+        { status: 400 }
+      );
+    }
+
     const apiUrl = `${INSTAGRAM_API_URL}?username=${username}`;
-    console.log(`API URL: ${apiUrl}`);
 
     const response = await fetch(apiUrl, {
       headers: {
@@ -120,71 +124,28 @@ export async function POST(request: Request) {
     }
 
     console.log({ data, user: data.data?.user });
-    const user = data.data?.user;
+    const instagramUser = data.data?.user;
 
-    if (!user) {
-      throw new Error("User not found or invalid response format");
-    }
-
-    // Find or create account in database
-    let account = await Account.findOne({
-      username: user.username,
-      userEmail: loggedUser?.email,
+    // Add new Instagram account
+    user.instagramAccounts.push({
+      username,
+      lastUpdated: new Date(),
+      currentFollowers: instagramUser.edge_followed_by.count,
+      followerHistory: [
+        {
+          count: instagramUser.edge_followed_by.count,
+          timestamp: new Date(),
+        },
+      ],
     });
-    console.log({ account });
-    if (!account) {
-      account = await Account.create({
-        username: user.username,
-        currentFollowers: user.edge_followed_by.count,
-        userEmail: loggedUser?.email,
-      });
-    }
 
-    // Update follower history if count changed
-    if (account.currentFollowers !== user.edge_followed_by.count) {
-      await FollowerHistory.create({
-        accountId: account._id,
-        count: user.edge_followed_by.count,
-      });
+    await user.save();
 
-      // Update current followers
-      account.currentFollowers = user.edge_followed_by.count;
-      account.lastUpdated = new Date();
-      await account.save();
-    }
-
-    // Get follower history for charts
-    const followerData = await FollowerHistory.find({
-      accountId: account._id,
-    }).sort({ timestamp: 1 });
-
-    // Calculate changes
-    const change24h = await getFollowerChange(account._id, 24);
-    const change7d = await getFollowerChange(account._id, 24 * 7);
-    const change30d = await getFollowerChange(account._id, 24 * 30);
-
-    const engagement = calculateEngagement(user);
-    const avgLikes = calculateAvgLikes(user);
-    const avgComments = calculateAvgComments(user);
-
-    return NextResponse.json({
-      username: user.username,
-      fullName: user.full_name,
-      followers: user.edge_followed_by.count,
-      following: user.edge_follow.count,
-      posts: user.edge_owner_to_timeline_media.edges.length,
-      engagement,
-      avgLikes,
-      avgComments,
-      change24h,
-      change7d,
-      change30d,
-      followerHistory: followerData,
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error in Instagram API route:", error);
+    console.error("Error adding Instagram account:", error);
     return NextResponse.json(
-      { error: "Failed to fetch Instagram data" },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }

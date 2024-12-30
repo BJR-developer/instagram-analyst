@@ -13,6 +13,33 @@ const followerHistorySchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
+const userSchema = new mongoose.Schema(
+  {
+    name: String,
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+    password: String,
+    instagramAccounts: [
+      {
+        username: String,
+        lastUpdated: Date,
+        followerHistory: [
+          {
+            count: Number,
+            timestamp: Date,
+          },
+        ],
+      },
+    ],
+  },
+  { timestamps: true }
+);
+
+export const User = mongoose.models.User || mongoose.model("User", userSchema);
+
 export const Account =
   mongoose.models.Account || mongoose.model("Account", accountSchema);
 export const FollowerHistory =
